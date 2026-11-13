@@ -1,5 +1,5 @@
 //@version=6
-indicator("Custom Volume Profile (Step / Session)", shorttitle="CVP", overlay=true, max_polylines_count=100, max_lines_count=500, max_bars_back=5000)
+indicator("Custom Volume Profile (Step / Session)", shorttitle="CVP", overlay=true, max_boxes_count=500, max_lines_count=500, max_polylines_count=100, max_bars_back=5000)
 
 // ============================================================================
 // INPUTS
@@ -11,14 +11,17 @@ sessPick = input.string("New York", "Session (Session mode)", options=["Asia", "
 sessCust = input.session("0930-1600", "Custom Session", group=G1)
 tz       = input.string("America/New_York", "Session Timezone", group=G1, tooltip="Presets (in New York time): Asia 2000-0400, London 0300-1130, New York 0930-1600.")
 
-G2 = "Resolution"
-rows     = input.int(100, "Rows per Profile", minval=5, maxval=500, group=G2, tooltip="More rows = finer price levels. Each profile is a single polyline, so there is no box limit.")
-useLtf   = input.bool(true, "Use Intrabar (Lower TF) Volume", group=G2, tooltip="Builds the profile from lower-timeframe candles for far more accurate volume placement. Needs the chart timeframe to be above the intrabar timeframe.")
-ltf      = input.timeframe("1", "Intrabar Timeframe", group=G2, tooltip="Must be lower than the chart timeframe. Lower = more accurate but heavier on long periods (day/week/month steps).")
+G2 = "Resolution & Performance"
+rows     = input.int(50, "Rows per Profile", minval=5, maxval=250, group=G2, tooltip="More rows = finer price levels. In Boxes render mode, rows x (profiles + 1) is capped at 500, so fewer profiles are kept when rows is high.")
+useLtf   = input.bool(true, "Use Intrabar (Lower TF) Volume", group=G2, tooltip="Builds the profile from lower-timeframe candles for more accurate volume placement. Ignored when the chart timeframe is not above the intrabar timeframe.")
+ltf      = input.timeframe("1", "Intrabar Timeframe", group=G2, tooltip="Must be lower than the chart timeframe. Use 5 or 15 for D / W / M steps to keep the script light.")
+lookback = input.int(1500, "Lookback (bars)", minval=100, maxval=20000, group=G2, tooltip="Only bars within this many bars of the latest bar are processed. Lower = faster, less chart load.")
+liveTick = input.bool(false, "Update Live Profile Every Tick", group=G2, tooltip="Off = the developing profile redraws once per closed bar (much lighter, no flicker). On = redraws on every price update.")
+render   = input.string("Boxes", "Render Mode", options=["Boxes", "Polyline (experimental)"], group=G2, tooltip="Boxes = reliable. Polyline = unlimited rows/profiles but may not display on all charts.")
 
 G3 = "Value Area"
 vaPct    = input.float(70.0, "Value Area %", minval=10, maxval=100, step=1, group=G3)
-maxProf  = input.int(30, "Max Profiles Kept", minval=1, maxval=49, group=G3, tooltip="Each profile uses 2 polylines; TradingView caps scripts at 100.")
+maxProf  = input.int(8, "Max Profiles Kept", minval=1, maxval=49, group=G3, tooltip="In Boxes mode this is automatically reduced so rows x (profiles + 1) <= 500.")
 
 G4 = "Appearance"
 widthPct = input.int(40, "Histogram Width (% of period length)", minval=5, maxval=100, group=G4)
@@ -32,7 +35,7 @@ vaLnCol  = input.color(color.new(color.blue, 20), "", group=G4, inline="va")
 extPoc   = input.bool(false, "Extend Developing POC/VAH/VAL to the right", group=G4)
 
 // ============================================================================
-// SESSION / PERIOD LOGIC
+// SETUP
 // ============================================================================
 sessStr = switch sessPick
     "Asia"     => "2000-0400"
@@ -40,12 +43,16 @@ sessStr = switch sessPick
     "New York" => "0930-1600"
     => sessCust
 
+usePoly = render != "Boxes"
+effProf = usePoly ? maxProf : math.max(1, math.min(maxProf, int(math.floor(500.0 / rows)) - 1))
+
 isStep  = mode == "Step"
 inSess  = not na(time(timeframe.period, sessStr, tz))
 newStep = timeframe.change(stepTf)
 
 closeCond = isStep ? newStep : (not inSess or not inSess[1])
 addCond   = isStep or inSess
+inRange   = bar_index >= last_bar_index - lookback
 
 ltfOk = useLtf and timeframe.in_seconds(ltf) < timeframe.in_seconds()
 barMs = timeframe.in_seconds() * 1000
@@ -59,15 +66,19 @@ var float[] vs = array.new_float()
 var int startT = na
 var int lastT  = na
 
+// Historical drawings: one entry per profile (boxes are flattened, rows per profile)
+var box[]      hBx = array.new<box>()
 var polyline[] hPl = array.new<polyline>()
 var line[]     hLn = array.new<line>()
+// Developing (live) profile drawings
+var box[]      dBx = array.new<box>()
 var polyline[] dPl = array.new<polyline>()
 var line[]     dLn = array.new<line>()
 
 // ============================================================================
 // RENDER
 // ============================================================================
-render(int st, int et, polyline[] pl, line[] ln, bool dev) =>
+drawProfile(int st, int et, box[] bx, polyline[] pl, line[] ln, bool dev) =>
     int n = array.size(hs)
     float hi = array.max(hs)
     float lo = array.min(ls)
@@ -106,32 +117,37 @@ render(int st, int et, polyline[] pl, line[] ln, bool dev) =>
             vl -= 1
             acc += dn
 
-    // Time-based geometry gives sub-bar horizontal resolution
+    // Time-based x coordinates give sub-bar horizontal resolution
     int widthMs = math.max(1, int((et - st) * widthPct / 100.0))
     bool left = side == "Left"
     int x0 = left ? st : et
 
-    chart.point[] fullPts = array.new<chart.point>()
-    chart.point[] vaPts   = array.new<chart.point>()
-
-    array.push(fullPts, chart.point.from_time(x0, lo))
-    array.push(vaPts, chart.point.from_time(x0, lo + vl * stp))
-    for r = 0 to rows - 1
-        float b = array.get(bins, r)
-        int len = mx > 0 ? int(widthMs * b / mx) : 0
-        int x = left ? x0 + len : x0 - len
-        float yb = lo + r * stp
-        float yt = lo + (r + 1) * stp
-        array.push(fullPts, chart.point.from_time(x, yb))
-        array.push(fullPts, chart.point.from_time(x, yt))
-        if r >= vl and r <= vh
-            array.push(vaPts, chart.point.from_time(x, yb))
-            array.push(vaPts, chart.point.from_time(x, yt))
-    array.push(fullPts, chart.point.from_time(x0, hi))
-    array.push(vaPts, chart.point.from_time(x0, lo + (vh + 1) * stp))
-
-    array.push(pl, polyline.new(fullPts, curved=false, closed=true, xloc=xloc.bar_time, line_color=na, fill_color=outCol))
-    array.push(pl, polyline.new(vaPts, curved=false, closed=true, xloc=xloc.bar_time, line_color=na, fill_color=vaCol))
+    if usePoly
+        chart.point[] fullPts = array.new<chart.point>()
+        chart.point[] vaPts   = array.new<chart.point>()
+        array.push(fullPts, chart.point.from_time(x0, lo))
+        array.push(vaPts, chart.point.from_time(x0, lo + vl * stp))
+        for r = 0 to rows - 1
+            int len = mx > 0 ? int(widthMs * array.get(bins, r) / mx) : 0
+            int x = left ? x0 + len : x0 - len
+            float yb = lo + r * stp
+            float yt = lo + (r + 1) * stp
+            array.push(fullPts, chart.point.from_time(x, yb))
+            array.push(fullPts, chart.point.from_time(x, yt))
+            if r >= vl and r <= vh
+                array.push(vaPts, chart.point.from_time(x, yb))
+                array.push(vaPts, chart.point.from_time(x, yt))
+        array.push(fullPts, chart.point.from_time(x0, hi))
+        array.push(vaPts, chart.point.from_time(x0, lo + (vh + 1) * stp))
+        array.push(pl, polyline.new(fullPts, false, true, xloc.bar_time, outCol, outCol))
+        array.push(pl, polyline.new(vaPts, false, true, xloc.bar_time, vaCol, vaCol))
+    else
+        for r = 0 to rows - 1
+            int len = mx > 0 ? math.max(1, int(widthMs * array.get(bins, r) / mx)) : 1
+            int xl = left ? x0 : x0 - len
+            int xr = left ? x0 + len : x0
+            color c = (r >= vl and r <= vh) ? vaCol : outCol
+            array.push(bx, box.new(xl, lo + (r + 1) * stp, xr, lo + r * stp, xloc=xloc.bar_time, border_color=c, border_width=0, bgcolor=c))
 
     float pocP = lo + (poc + 0.5) * stp
     float vahP = lo + (vh + 1) * stp
@@ -141,13 +157,21 @@ render(int st, int et, polyline[] pl, line[] ln, bool dev) =>
     array.push(ln, line.new(st, vahP, et, vahP, xloc=xloc.bar_time, extend=ext, color=showVa ? vaLnCol : na, style=line.style_dashed))
     array.push(ln, line.new(st, valP, et, valP, xloc=xloc.bar_time, extend=ext, color=showVa ? vaLnCol : na, style=line.style_dashed))
 
+clearDev() =>
+    while array.size(dBx) > 0
+        box.delete(array.pop(dBx))
+    while array.size(dPl) > 0
+        polyline.delete(array.pop(dPl))
+    while array.size(dLn) > 0
+        line.delete(array.pop(dLn))
+
 // ============================================================================
 // INTRABAR DATA
 // ============================================================================
 float[] lh = na
 float[] ll = na
 float[] lv = na
-if ltfOk
+if ltfOk and inRange
     [h_, l_, v_] = request.security_lower_tf(syminfo.tickerid, ltf, [high, low, volume])
     lh := h_
     ll := l_
@@ -158,20 +182,23 @@ if ltfOk
 // ============================================================================
 // 1) Finalize previous profile
 if closeCond and array.size(hs) > 0
-    render(startT, lastT + barMs, hPl, hLn, false)
+    if inRange
+        drawProfile(startT, lastT + barMs, hBx, hPl, hLn, false)
+        while array.size(hBx) > effProf * rows
+            box.delete(array.shift(hBx))
+        while array.size(hPl) > effProf * 2
+            polyline.delete(array.shift(hPl))
+        while array.size(hLn) > effProf * 3
+            line.delete(array.shift(hLn))
     array.clear(hs)
     array.clear(ls)
     array.clear(vs)
-    while array.size(hPl) > maxProf * 2
-        polyline.delete(array.shift(hPl))
-    while array.size(hLn) > maxProf * 3
-        line.delete(array.shift(hLn))
 
 // 2) Accumulate current bar (intrabar candles if available, else the bar itself)
-if addCond
+if addCond and inRange
     if array.size(hs) == 0
         startT := time
-    int m = ltfOk ? array.size(lh) : 0
+    int m = ltfOk and not na(lh) ? array.size(lh) : 0
     if m > 0
         for i = 0 to m - 1
             float ih = array.get(lh, i)
@@ -186,11 +213,8 @@ if addCond
         array.push(vs, volume)
     lastT := time
 
-// 3) Developing (live) profile
-if barstate.islast
-    while array.size(dPl) > 0
-        polyline.delete(array.pop(dPl))
-    while array.size(dLn) > 0
-        line.delete(array.pop(dLn))
+// 3) Developing (live) profile – throttled to avoid redrawing on every tick
+if barstate.islast and (liveTick or not barstate.isrealtime or barstate.isconfirmed or closeCond)
+    clearDev()
     if array.size(hs) > 0
-        render(startT, time + barMs, dPl, dLn, true)
+        drawProfile(startT, time + barMs, dBx, dPl, dLn, true)
