@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 indicator("Custom Volume Profile (Step / Session)", shorttitle="CVP", overlay=true, max_boxes_count=500, max_lines_count=500, max_bars_back=5000)
 
 // ============================================================================
@@ -113,7 +113,7 @@ render(int sb, int eb, box[] bx, line[] ln, bool dev) =>
     float pocP = lo + (poc + 0.5) * stp
     float vahP = lo + (vh + 1) * stp
     float valP = lo + vl * stp
-    extend ext = (dev and extPoc) ? extend.right : extend.none
+    string ext = (dev and extPoc) ? extend.right : extend.none
     array.push(ln, line.new(sb, pocP, eb, pocP, xloc=xloc.bar_index, extend=ext, color=showPoc ? pocCol : na, width=2))
     array.push(ln, line.new(sb, vahP, eb, vahP, xloc=xloc.bar_index, extend=ext, color=showVa ? vaLnCol : na, style=line.style_dashed))
     array.push(ln, line.new(sb, valP, eb, valP, xloc=xloc.bar_index, extend=ext, color=showVa ? vaLnCol : na, style=line.style_dashed))
