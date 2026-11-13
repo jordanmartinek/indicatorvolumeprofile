@@ -11,28 +11,39 @@ sessPick = input.string("New York", "Session (Session mode)", options=["Asia", "
 sessCust = input.session("0930-1600", "Custom Session", group=G1)
 tz       = input.string("America/New_York", "Session Timezone", group=G1, tooltip="Presets (in New York time): Asia 2000-0400, London 0300-1130, New York 0930-1600.")
 
-G2 = "Resolution & Performance"
-rows     = input.int(50, "Rows per Profile", minval=5, maxval=250, group=G2, tooltip="More rows = finer price levels. In Boxes render mode, rows x (profiles + 1) is capped at 500, so fewer profiles are kept when rows is high.")
-useLtf   = input.bool(true, "Use Intrabar (Lower TF) Volume", group=G2, tooltip="Builds the profile from lower-timeframe candles for more accurate volume placement. Ignored when the chart timeframe is not above the intrabar timeframe.")
-ltf      = input.timeframe("1", "Intrabar Timeframe", group=G2, tooltip="Must be lower than the chart timeframe. Use 5 or 15 for D / W / M steps to keep the script light.")
-lookback = input.int(1500, "Lookback (bars)", minval=100, maxval=20000, group=G2, tooltip="Only bars within this many bars of the latest bar are processed. Lower = faster, less chart load.")
-liveTick = input.bool(false, "Update Live Profile Every Tick", group=G2, tooltip="Off = the developing profile redraws once per closed bar (much lighter, no flicker). On = redraws on every price update.")
-render   = input.string("Boxes", "Render Mode", options=["Boxes", "Polyline (experimental)"], group=G2, tooltip="Boxes = reliable. Polyline = unlimited rows/profiles but may not display on all charts.")
+G2 = "Rows & Distribution"
+rowMode  = input.string("Ticks per Row", "Row Sizing", options=["Ticks per Row", "Fixed Row Count"], group=G2, tooltip="Ticks per Row = each row is an exact price level (e.g. 4 ticks = 1 point on NQ/ES). Fixed = the profile range split into N rows.")
+tpr      = input.int(4, "Ticks per Row", minval=1, maxval=1000, group=G2)
+rows     = input.int(50, "Fixed Row Count", minval=5, maxval=250, group=G2)
+dist     = input.string("Body Weighted", "Volume Distribution", options=["Body Weighted", "Triangular (Close)", "Uniform"], group=G2, tooltip="How each candle's volume is spread over its range. Uniform = even (blocky). Body Weighted = more volume where the candle body traded. Triangular = peaks at the close.")
+bodyW    = input.float(3.0, "Body Weight", minval=1, maxval=20, step=0.5, group=G2, tooltip="Body Weighted only: how much more volume a body row gets vs a wick row.")
+useLtf   = input.bool(true, "Use Intrabar (Lower TF) Volume", group=G2, tooltip="Builds the profile from lower-timeframe candles. Ignored when the chart timeframe is not above the intrabar timeframe.")
+ltf      = input.timeframe("1", "Intrabar Timeframe", group=G2, tooltip="Lower = sharper profile. Seconds (e.g. 15S) work on plans that support them. Use 5 or 15 for D / W / M steps.")
 
-G3 = "Value Area"
-vaPct    = input.float(70.0, "Value Area %", minval=10, maxval=100, step=1, group=G3)
-maxProf  = input.int(8, "Max Profiles Kept", minval=1, maxval=49, group=G3, tooltip="In Boxes mode this is automatically reduced so rows x (profiles + 1) <= 500.")
+G3 = "Performance"
+maxProf  = input.int(6, "Max Profiles Kept", minval=1, maxval=49, group=G3, tooltip="Boxes mode: 500 boxes are shared, so each profile can have up to 500 / (profiles + 1) rows. Fewer profiles = more rows each.")
+lookback = input.int(1500, "Lookback (bars)", minval=100, maxval=20000, group=G3)
+liveTick = input.bool(false, "Update Live Profile Every Tick", group=G3)
+render   = input.string("Boxes", "Render Mode", options=["Boxes", "Polyline (experimental)"], group=G3)
 
-G4 = "Appearance"
-widthPct = input.int(40, "Histogram Width (% of period length)", minval=5, maxval=100, group=G4)
-side     = input.string("Left", "Histogram Anchor", options=["Left", "Right"], group=G4)
-vaCol    = input.color(color.new(color.blue, 55), "Value Area Color", group=G4)
-outCol   = input.color(color.new(color.gray, 70), "Outside Value Area Color", group=G4)
-showPoc  = input.bool(true, "Show POC", group=G4, inline="poc")
-pocCol   = input.color(color.orange, "", group=G4, inline="poc")
-showVa   = input.bool(true, "Show VAH / VAL Lines", group=G4, inline="va")
-vaLnCol  = input.color(color.new(color.blue, 20), "", group=G4, inline="va")
-extPoc   = input.bool(false, "Extend Developing POC/VAH/VAL to the right", group=G4)
+G4 = "Value Area"
+vaPct    = input.float(70.0, "Value Area %", minval=10, maxval=100, step=1, group=G4)
+
+G5 = "Appearance"
+colMode  = input.string("Value Area", "Color Mode", options=["Value Area", "Heatmap"], group=G5, tooltip="Heatmap colors each row by its volume, making high/low volume nodes stand out.")
+widthPct = input.int(40, "Histogram Width (% of period length)", minval=5, maxval=100, group=G5)
+side     = input.string("Left", "Histogram Anchor", options=["Left", "Right"], group=G5)
+gapPct   = input.int(20, "Row Gap %", minval=0, maxval=80, group=G5, tooltip="Vertical gap between rows so each level is visually separate. 0 = solid.")
+vaCol    = input.color(color.new(color.blue, 45), "Value Area Color", group=G5)
+outCol   = input.color(color.new(color.gray, 65), "Outside Value Area Color", group=G5)
+heatLo   = input.color(color.new(color.blue, 80), "Heatmap Low", group=G5, inline="heat")
+heatHi   = input.color(color.new(color.yellow, 10), "High", group=G5, inline="heat")
+hlPocRow = input.bool(true, "Highlight POC Row", group=G5)
+showPoc  = input.bool(true, "Show POC Line", group=G5, inline="poc")
+pocCol   = input.color(color.orange, "", group=G5, inline="poc")
+showVa   = input.bool(true, "Show VAH / VAL Lines", group=G5, inline="va")
+vaLnCol  = input.color(color.new(color.blue, 20), "", group=G5, inline="va")
+extPoc   = input.bool(false, "Extend Developing POC/VAH/VAL to the right", group=G5)
 
 // ============================================================================
 // SETUP
@@ -43,8 +54,10 @@ sessStr = switch sessPick
     "New York" => "0930-1600"
     => sessCust
 
-usePoly = render != "Boxes"
-effProf = usePoly ? maxProf : math.max(1, math.min(maxProf, int(math.floor(500.0 / rows)) - 1))
+usePoly  = render != "Boxes"
+fixedRow = rowMode == "Fixed Row Count"
+effProf  = (usePoly or not fixedRow) ? maxProf : math.max(1, math.min(maxProf, int(math.floor(500.0 / rows)) - 1))
+rowCap   = usePoly ? 1500 : math.max(5, int(math.floor(500.0 / (effProf + 1))))
 
 isStep  = mode == "Step"
 inSess  = not na(time(timeframe.period, sessStr, tz))
@@ -62,21 +75,22 @@ barMs = timeframe.in_seconds() * 1000
 // ============================================================================
 var float[] hs = array.new_float()
 var float[] ls = array.new_float()
+var float[] os = array.new_float()
+var float[] cs = array.new_float()
 var float[] vs = array.new_float()
 var int startT = na
 var int lastT  = na
 
-// Historical drawings: one entry per profile (boxes are flattened, rows per profile)
-var box[]      hBx = array.new<box>()
-var polyline[] hPl = array.new<polyline>()
-var line[]     hLn = array.new<line>()
-// Developing (live) profile drawings
-var box[]      dBx = array.new<box>()
-var polyline[] dPl = array.new<polyline>()
-var line[]     dLn = array.new<line>()
+var box[]      hBx  = array.new<box>()
+var int[]      hCnt = array.new<int>()     // boxes per historical profile
+var polyline[] hPl  = array.new<polyline>()
+var line[]     hLn  = array.new<line>()
+var box[]      dBx  = array.new<box>()
+var polyline[] dPl  = array.new<polyline>()
+var line[]     dLn  = array.new<line>()
 
 // ============================================================================
-// RENDER
+// RENDER (returns number of boxes created)
 // ============================================================================
 drawProfile(int st, int et, box[] bx, polyline[] pl, line[] ln, bool dev) =>
     int n = array.size(hs)
@@ -84,32 +98,65 @@ drawProfile(int st, int et, box[] bx, polyline[] pl, line[] ln, bool dev) =>
     float lo = array.min(ls)
     if hi - lo < syminfo.mintick
         hi := lo + syminfo.mintick
-    float stp = (hi - lo) / rows
 
-    // Distribute each candle's volume across the rows it spans
-    float[] bins = array.new_float(rows, 0.0)
+    // ---- Row grid ----
+    int nr = math.min(rows, rowCap)
+    float stp = (hi - lo) / nr
+    if not fixedRow
+        float rs = tpr * syminfo.mintick
+        float lo2 = math.floor(lo / rs) * rs
+        int need = math.max(1, int(math.ceil((hi - lo2) / rs)))
+        if need <= rowCap
+            lo := lo2
+            nr := need
+            stp := rs
+            hi := lo + nr * stp
+        else
+            nr := rowCap
+            stp := (hi - lo) / nr
+
+    // ---- Volume distribution ----
+    float[] bins = array.new_float(nr, 0.0)
     for i = 0 to n - 1
         float h = array.get(hs, i)
         float l = array.get(ls, i)
+        float o = array.get(os, i)
+        float c = array.get(cs, i)
         float v = nz(array.get(vs, i))
-        int r0 = math.max(0, math.min(rows - 1, int(math.floor((l - lo) / stp))))
-        int r1 = math.max(0, math.min(rows - 1, int(math.floor((h - lo) / stp))))
-        float share = v / (r1 - r0 + 1)
-        for r = r0 to r1
-            array.set(bins, r, array.get(bins, r) + share)
+        int r0 = math.max(0, math.min(nr - 1, int(math.floor((l - lo) / stp))))
+        int r1 = math.max(0, math.min(nr - 1, int(math.floor((h - lo) / stp))))
+        if r0 == r1 or dist == "Uniform"
+            float share = v / (r1 - r0 + 1)
+            for r = r0 to r1
+                array.set(bins, r, array.get(bins, r) + share)
+        else
+            float bt = math.max(o, c)
+            float bb = math.min(o, c)
+            float span = h - l + stp
+            float wsum = 0.0
+            for r = r0 to r1
+                float rb = lo + r * stp
+                float mid = rb + stp * 0.5
+                float w = dist == "Body Weighted" ? ((rb + stp >= bb and rb <= bt) ? bodyW : 1.0) : (1.0 - math.abs(mid - c) / span)
+                wsum += w
+            for r = r0 to r1
+                float rb = lo + r * stp
+                float mid = rb + stp * 0.5
+                float w = dist == "Body Weighted" ? ((rb + stp >= bb and rb <= bt) ? bodyW : 1.0) : (1.0 - math.abs(mid - c) / span)
+                array.set(bins, r, array.get(bins, r) + v * w / wsum)
 
     float mx = array.max(bins)
     int poc = array.indexof(bins, mx)
     float total = array.sum(bins)
     float target = total * vaPct / 100.0
 
-    // Value area expansion from the POC
+    // ---- Value area ----
     int vl = poc
     int vh = poc
     float acc = mx
-    while acc < target and (vl > 0 or vh < rows - 1)
+    while acc < target and (vl > 0 or vh < nr - 1)
         float dn = vl > 0 ? array.get(bins, vl - 1) : -1.0
-        float up = vh < rows - 1 ? array.get(bins, vh + 1) : -1.0
+        float up = vh < nr - 1 ? array.get(bins, vh + 1) : -1.0
         if up >= dn
             vh += 1
             acc += up
@@ -117,21 +164,23 @@ drawProfile(int st, int et, box[] bx, polyline[] pl, line[] ln, bool dev) =>
             vl -= 1
             acc += dn
 
-    // Time-based x coordinates give sub-bar horizontal resolution
+    // ---- Draw ----
     int widthMs = math.max(1, int((et - st) * widthPct / 100.0))
     bool left = side == "Left"
     int x0 = left ? st : et
+    float gap = stp * gapPct / 200.0
+    int cnt = 0
 
     if usePoly
         chart.point[] fullPts = array.new<chart.point>()
         chart.point[] vaPts   = array.new<chart.point>()
         array.push(fullPts, chart.point.from_time(x0, lo))
         array.push(vaPts, chart.point.from_time(x0, lo + vl * stp))
-        for r = 0 to rows - 1
+        for r = 0 to nr - 1
             int len = mx > 0 ? int(widthMs * array.get(bins, r) / mx) : 0
             int x = left ? x0 + len : x0 - len
             float yb = lo + r * stp
-            float yt = lo + (r + 1) * stp
+            float yt = yb + stp
             array.push(fullPts, chart.point.from_time(x, yb))
             array.push(fullPts, chart.point.from_time(x, yt))
             if r >= vl and r <= vh
@@ -142,20 +191,28 @@ drawProfile(int st, int et, box[] bx, polyline[] pl, line[] ln, bool dev) =>
         array.push(pl, polyline.new(fullPts, false, true, xloc.bar_time, outCol, outCol))
         array.push(pl, polyline.new(vaPts, false, true, xloc.bar_time, vaCol, vaCol))
     else
-        for r = 0 to rows - 1
-            int len = mx > 0 ? math.max(1, int(widthMs * array.get(bins, r) / mx)) : 1
-            int xl = left ? x0 : x0 - len
-            int xr = left ? x0 + len : x0
-            color c = (r >= vl and r <= vh) ? vaCol : outCol
-            array.push(bx, box.new(xl, lo + (r + 1) * stp, xr, lo + r * stp, xloc=xloc.bar_time, border_color=c, border_width=0, bgcolor=c))
+        for r = 0 to nr - 1
+            float b = array.get(bins, r)
+            if b > 0
+                int len = mx > 0 ? math.max(1, int(widthMs * b / mx)) : 1
+                int xl = left ? x0 : x0 - len
+                int xr = left ? x0 + len : x0
+                color c = colMode == "Heatmap" ? color.from_gradient(b, 0, mx, heatLo, heatHi) : ((r >= vl and r <= vh) ? vaCol : outCol)
+                if hlPocRow and r == poc
+                    c := color.new(pocCol, 20)
+                float yb = lo + r * stp + gap
+                float yt = lo + (r + 1) * stp - gap
+                array.push(bx, box.new(xl, yt, xr, yb, xloc=xloc.bar_time, border_color=c, border_width=0, bgcolor=c))
+                cnt += 1
 
     float pocP = lo + (poc + 0.5) * stp
     float vahP = lo + (vh + 1) * stp
     float valP = lo + vl * stp
     string ext = (dev and extPoc) ? extend.right : extend.none
-    array.push(ln, line.new(st, pocP, et, pocP, xloc=xloc.bar_time, extend=ext, color=showPoc ? pocCol : na, width=2))
+    array.push(ln, line.new(st, pocP, et, pocP, xloc=xloc.bar_time, extend=ext, color=showPoc ? pocCol : na, width=1))
     array.push(ln, line.new(st, vahP, et, vahP, xloc=xloc.bar_time, extend=ext, color=showVa ? vaLnCol : na, style=line.style_dashed))
     array.push(ln, line.new(st, valP, et, valP, xloc=xloc.bar_time, extend=ext, color=showVa ? vaLnCol : na, style=line.style_dashed))
+    cnt
 
 clearDev() =>
     while array.size(dBx) > 0
@@ -170,11 +227,15 @@ clearDev() =>
 // ============================================================================
 float[] lh = na
 float[] ll = na
+float[] lo_ = na
+float[] lc = na
 float[] lv = na
 if ltfOk and inRange
-    [h_, l_, v_] = request.security_lower_tf(syminfo.tickerid, ltf, [high, low, volume])
+    [h_, l_, o_, c_, v_] = request.security_lower_tf(syminfo.tickerid, ltf, [high, low, open, close, volume])
     lh := h_
     ll := l_
+    lo_ := o_
+    lc := c_
     lv := v_
 
 // ============================================================================
@@ -183,15 +244,21 @@ if ltfOk and inRange
 // 1) Finalize previous profile
 if closeCond and array.size(hs) > 0
     if inRange
-        drawProfile(startT, lastT + barMs, hBx, hPl, hLn, false)
-        while array.size(hBx) > effProf * rows
-            box.delete(array.shift(hBx))
+        int k = drawProfile(startT, lastT + barMs, hBx, hPl, hLn, false)
+        array.push(hCnt, k)
+        while array.size(hCnt) > effProf
+            int d = array.shift(hCnt)
+            if d > 0
+                for j = 1 to d
+                    box.delete(array.shift(hBx))
         while array.size(hPl) > effProf * 2
             polyline.delete(array.shift(hPl))
         while array.size(hLn) > effProf * 3
             line.delete(array.shift(hLn))
     array.clear(hs)
     array.clear(ls)
+    array.clear(os)
+    array.clear(cs)
     array.clear(vs)
 
 // 2) Accumulate current bar (intrabar candles if available, else the bar itself)
@@ -206,10 +273,14 @@ if addCond and inRange
             if not na(ih) and not na(il)
                 array.push(hs, ih)
                 array.push(ls, il)
+                array.push(os, nz(array.get(lo_, i), il))
+                array.push(cs, nz(array.get(lc, i), ih))
                 array.push(vs, nz(array.get(lv, i)))
     else
         array.push(hs, high)
         array.push(ls, low)
+        array.push(os, open)
+        array.push(cs, close)
         array.push(vs, volume)
     lastT := time
 
