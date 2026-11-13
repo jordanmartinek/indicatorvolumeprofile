@@ -10,6 +10,8 @@ stepTf   = input.timeframe("60", "Step Interval (Step mode)", group=G1, tooltip=
 sessPick = input.string("New York", "Session (Session mode)", options=["Asia", "London", "New York", "Custom"], group=G1)
 sessCust = input.session("0930-1600", "Custom Session", group=G1)
 tz       = input.string("America/New_York", "Session Timezone", group=G1, tooltip="Presets (in New York time): Asia 2000-0400, London 0300-1130, New York 0930-1600.")
+dayOnly  = input.bool(false, "Only Show a Specific Day", group=G1, inline="day", tooltip="Only builds profiles whose period STARTS on this date (in the Session Timezone). Session mode: that day's session. Step mode: every step profile of that day. Format: YYYY-MM-DD. Note: Asia (2000-0400) starts the evening before the trading day it belongs to.")
+dayStr   = input.string("2026-11-12", "", group=G1, inline="day")
 
 G2 = "Rows & Distribution"
 rowMode  = input.string("Ticks per Row", "Row Sizing", options=["Ticks per Row", "Fixed Row Count"], group=G2, tooltip="Ticks per Row = each row is an exact price level (e.g. 4 ticks = 1 point on NQ/ES). Fixed = the profile range split into N rows.")
@@ -65,7 +67,25 @@ newStep = timeframe.change(stepTf)
 
 closeCond = isStep ? newStep : (not inSess or not inSess[1])
 addCond   = isStep or inSess
-inRange   = bar_index >= last_bar_index - lookback
+// Bar on which a new period begins
+startCond = isStep ? (newStep or barstate.isfirst) : (inSess and not inSess[1])
+
+// ---- Specific-day filter (YYYY-MM-DD parsed in the Session Timezone) ----
+string[] dParts = str.split(str.trim(dayStr), "-")
+int tY = array.size(dParts) == 3 ? int(str.tonumber(array.get(dParts, 0))) : na
+int tM = array.size(dParts) == 3 ? int(str.tonumber(array.get(dParts, 1))) : na
+int tD = array.size(dParts) == 3 ? int(str.tonumber(array.get(dParts, 2))) : na
+int dayStart = na(tY) or na(tM) or na(tD) ? na : timestamp(tz, tY, tM, tD, 0, 0)
+bool barOnDay = year(time, tz) == tY and month(time, tz) == tM and dayofmonth(time, tz) == tD
+// Loose window around the target day so only nearby bars do any work
+bool nearDay = not na(dayStart) and time >= dayStart - 86400000 and time < dayStart + 2 * 86400000
+
+inRange   = dayOnly ? nearDay : bar_index >= last_bar_index - lookback
+
+// Decide at the start of each period whether it should be built
+var bool periodOk = true
+if startCond
+    periodOk := not dayOnly or barOnDay
 
 ltfOk = useLtf and timeframe.in_seconds(ltf) < timeframe.in_seconds()
 barMs = timeframe.in_seconds() * 1000
@@ -243,18 +263,17 @@ if ltfOk and inRange
 // ============================================================================
 // 1) Finalize previous profile
 if closeCond and array.size(hs) > 0
-    if inRange
-        int k = drawProfile(startT, lastT + barMs, hBx, hPl, hLn, false)
-        array.push(hCnt, k)
-        while array.size(hCnt) > effProf
-            int d = array.shift(hCnt)
-            if d > 0
-                for j = 1 to d
-                    box.delete(array.shift(hBx))
-        while array.size(hPl) > effProf * 2
-            polyline.delete(array.shift(hPl))
-        while array.size(hLn) > effProf * 3
-            line.delete(array.shift(hLn))
+    int k = drawProfile(startT, lastT + barMs, hBx, hPl, hLn, false)
+    array.push(hCnt, k)
+    while array.size(hCnt) > effProf
+        int d = array.shift(hCnt)
+        if d > 0
+            for j = 1 to d
+                box.delete(array.shift(hBx))
+    while array.size(hPl) > effProf * 2
+        polyline.delete(array.shift(hPl))
+    while array.size(hLn) > effProf * 3
+        line.delete(array.shift(hLn))
     array.clear(hs)
     array.clear(ls)
     array.clear(os)
@@ -262,7 +281,7 @@ if closeCond and array.size(hs) > 0
     array.clear(vs)
 
 // 2) Accumulate current bar (intrabar candles if available, else the bar itself)
-if addCond and inRange
+if addCond and inRange and periodOk
     if array.size(hs) == 0
         startT := time
     int m = ltfOk and not na(lh) ? array.size(lh) : 0
